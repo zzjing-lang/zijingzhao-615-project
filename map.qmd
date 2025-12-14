@@ -1,0 +1,240 @@
+---
+title: "Map"
+format: pdf
+editor: visual
+---
+
+# Introduction
+
+Macau’s economy is uniquely structured around tourism and gaming, making it highly sensitive to external shocks and policy changes. To understand the city’s economic trajectory over the past decade, this report analyzes three key indicators from 2015 to 2025: Gross Domestic Product (GDP), Gaming Revenue, and Domestic Exports. These indicators capture both the scale of Macau’s core industries and the performance of smaller non-gaming sectors. The analysis combines exploratory data visualization, comparative trends, and geographic context using maps and interactive dashboards. Together, these components provide a comprehensive overview of Macau’s economic evolution and highlight the differential recovery patterns following the COVID-19 pandemic.
+
+# Map
+
+```{r}
+library(sf)
+library(rnaturalearth)
+library(dplyr)
+library(ggplot2)
+library(units)
+
+# Disable s2 geometry for robustness
+sf::sf_use_s2(FALSE)
+
+# Get country boundary
+china_sf <- ne_countries(
+  scale = "small",
+  returnclass = "sf"
+)
+
+# Crop to Macau region
+macau_sf <- china_sf |>
+  st_crop(xmin = 113.5, xmax = 114.1,
+          ymin = 22.0,  ymax = 22.6)
+
+# Project to planar CRS for area calculation
+macau_sf_proj <- st_transform(macau_sf, 3857)
+
+# Create illustrative population variable
+macau_sf_proj$population <- 680000
+
+# Compute area in square kilometers (now safe)
+macau_sf_proj$area_km2 <- set_units(
+  st_area(macau_sf_proj), km^2
+) |> drop_units()
+
+# Compute population density
+macau_sf_proj$pop_density <- macau_sf_proj$population / macau_sf_proj$area_km2
+
+# Plot map (use projected object)
+ggplot(macau_sf_proj) +
+  geom_sf(aes(fill = pop_density), color = "white", linewidth = 0.6) +
+  scale_fill_viridis_c(
+    name = "Population density\n(persons / km²)"
+  ) +
+  labs(
+    title = "Population Density in Macau",
+    subtitle = "Spatial illustration using Natural Earth boundaries",
+    caption = "Source: Natural Earth (small scale)"
+  ) +
+  theme_minimal(base_size = 13)
+ coord_sf(expand = FALSE)
+ saveRDS(macau_sf_proj, "macau_sf_proj.rds")
+```
+
+## Interactive Spatial Visualization
+
+Figure1 presents an interactive map illustrating population density in Macau based on geographic boundaries from the Natural Earth dataset. The map integrates spatial data with an illustrative population input to compute population density per square kilometer. An interactive slider allows users to adjust the assumed population size and observe the corresponding change in population density in real time.
+
+Because the visualization represents Macau as a single spatial unit, the color scale is fixed across a predefined range to ensure that changes in population density are visually discernible as the input varies. This interactive component is intended to demonstrate the use of reactive visualization for exploring how demographic assumptions influence derived spatial measures, rather than to provide a precise representation of official administrative population statistics.
+
+This interactive component is included to demonstrate how demographic assumptions propagate into derived spatial measures. Rather than presenting official population statistics, the Shiny app serves as a sensitivity analysis tool that highlights the relationship between assumed population size and population density.
+
+# GDP
+
+Macau’s GDP provides an overall measure of the city’s macroeconomic performance and captures the impact of major external events on economic activity. Analyzing GDP trends from 2015 to 2025 helps identify periods of expansion, contraction, and post-pandemic recovery. This indicator serves as the baseline reference for understanding broader economic conditions.
+
+## cleandata
+
+```{r}
+library(readxl)
+library(dplyr)
+library(stringr)
+
+gdp_raw <- read_excel("dsec.xlsx")
+
+gdp <- gdp_raw %>%
+  slice(-(1:3)) %>%                      # remove header notes
+  rename(year_raw = 1, gdp_mop = 2) %>%
+  mutate(
+    year = as.numeric(str_extract(year_raw, "\\d+")),
+    gdp_mop = suppressWarnings(as.numeric(gdp_mop))
+  ) %>%
+  filter(!is.na(year), !is.na(gdp_mop)) %>%  # keep valid rows only
+  select(year, gdp_mop) %>%
+  arrange(year)
+```
+
+The raw datasets provided by DSEC contain header notes and mixed reporting frequencies (annual and quarterly records). To ensure consistency across indicators, only annual observations were retained, and non-numeric formatting (e.g., commas in monetary values) was removed prior to analysis.
+
+Rows with missing or non-numeric values were excluded to ensure comparability across years.
+
+## analysis
+
+```{r}
+library(ggplot2)
+
+ggplot(gdp, aes(year, gdp_mop)) +
+  geom_line(linewidth = 1.2, color = "#1f77b4") +
+  geom_point(size = 2) +
+  theme_minimal() +
+  labs(
+    title = "Macau Annual GDP (Million MOP)",
+    x = "Year",
+    y = "GDP (Million MOP)"
+  )
+```
+
+# Gaming Revenue
+
+Gaming revenue is Macau’s dominant economic pillar and therefore a key indicator of the city’s short-term economic fluctuations. Examining the gaming industry’s performance over time highlights both structural dependence and the scale of the pandemic shock. This trend also provides important context when comparing gaming-driven versus non-gaming economic activities.
+
+## cleandata
+
+```{r}
+library(readxl)
+library(dplyr)
+library(stringr)
+
+gaming_raw <- read_excel("dsec2.xlsx")
+
+gaming <- gaming_raw %>%
+  slice(-(1:3)) %>%                      # remove header notes
+  rename(year_raw = 1, gaming_mop = 2) %>%
+  mutate(
+    year = as.numeric(str_extract(year_raw, "\\d+")),
+    gaming_mop = suppressWarnings(as.numeric(gaming_mop))
+  ) %>%
+  filter(!is.na(year), !is.na(gaming_mop)) %>%
+  select(year, gaming_mop) %>%
+  arrange(year)
+```
+
+## analysis
+
+```{r}
+library(ggplot2)
+
+ggplot(gaming, aes(year, gaming_mop)) +
+  geom_line(linewidth = 1.2, color = "#d62728") +
+  geom_point(size = 2) +
+  theme_minimal() +
+  labs(
+    title = "Macau Annual Gaming Revenue (Million MOP)",
+    x = "Year",
+    y = "Gaming Revenue (Million MOP)"
+  )
+```
+
+# External Merchandise Trade
+
+Although domestic exports represent only a small share of Macau’s overall economy, they reflect the performance of the city’s local manufacturing and re-export sectors. Tracking export levels helps illustrate how smaller non-gaming industries respond to economic cycles and external demand. Including this indicator allows for a more balanced understanding of Macau’s economic diversification efforts.
+
+## cleandata
+
+```{r}
+trade_raw <- read_excel("dsec3.xlsx", col_names = FALSE) %>%
+  rename(
+    period = ...1,
+    trade_mop = ...2
+  )
+trade <- trade_raw %>%
+  filter(str_detect(period, "^\\d{4}年$")) %>%
+  mutate(
+    year = as.numeric(str_extract(period, "\\d{4}")),
+    trade_mop = as.numeric(str_remove_all(trade_mop, ","))
+  ) %>%
+  select(year, trade_mop) %>%
+  arrange(year)
+```
+
+## analysis
+
+```{r}
+ggplot(trade, aes(year, trade_mop)) +
+  geom_line(linewidth = 1.2, color = "#2ca02c") +
+  geom_point(size = 2) +
+  theme_minimal() +
+  labs(
+    title = "Macau External Merchandise Trade (Million MOP)",
+    x = "Year",
+    y = "Trade Value (Million MOP)"
+  )
+```
+
+# Analysis
+
+```{r}
+gdp <- gdp %>% filter(year >= 2015, year <= 2025)
+gaming <- gaming %>% filter(year >= 2015, year <= 2025)
+trade <- trade %>% filter(year >= 2015, year <= 2025)
+econ_all <- gdp %>%
+  rename(gdp = gdp_mop) %>%
+  left_join(gaming %>% rename(gaming = gaming_mop), by = "year") %>%
+  left_join(trade %>% rename(trade = trade_mop), by = "year")
+econ_all
+```
+
+## plot
+
+```{r}
+library(tidyr)
+
+econ_long <- econ_all %>%
+  pivot_longer(cols = c(gdp, gaming, trade),
+               names_to = "indicator",
+               values_to = "value")
+
+ggplot(econ_long, aes(year, value, color = indicator)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  scale_color_manual(values = c(
+    "gdp" = "#1f77b4",
+    "gaming" = "#d62728",
+    "trade" = "#2ca02c"
+  )) +
+  labs(
+    title = "Macau Economic Indicators (2015–2025)",
+    x = "Year",
+    y = "Value (Million MOP)",
+    color = "Indicator"
+  )
+```
+
+## Conclusion
+
+Overall, this project demonstrates how publicly available economic and demographic data can be integrated with spatial visualization and interactive tools to support exploratory analysis. The combination of static summaries and Shiny-based sensitivity analysis provides an intuitive framework for examining structural patterns in Macau’s economy while highlighting the importance of data assumptions in applied analysis.
+
+## Future work
+
+Future extensions could incorporate sub-regional population data or alternative spatial units if available.
